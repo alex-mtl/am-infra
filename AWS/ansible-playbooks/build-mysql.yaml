@@ -1,0 +1,56 @@
+- name: Provision MySQL on Ubuntu EC2 instance
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Launch Ubuntu EC2 instance
+      ec2_instance:
+        key_name: "{{ lookup('env', 'YOUR_KEY_NAME') }}"
+        instance_type: t2.micro
+        image: ami-12345678  # Replace with the AMI ID of Ubuntu
+        region: "{{ lookup('env', 'AWS_REGION') }}"
+        group: "{{ lookup('env', 'YOUR_SECURITY_GROUP') }}"
+        count: 1
+        instance_tags:
+          Name: ubuntu-instance
+        wait: yes
+      register: ubuntu_instance_info
+
+    - name: Add new instance to host group
+      add_host:
+        name: "{{ item.public_ip }}"
+        groups: ubuntu_instances
+      with_items: "{{ ubuntu_instance_info.instances }}"
+
+- name: Install MySQL on Ubuntu
+  hosts: ubuntu_instances
+  gather_facts: yes
+  become: yes
+  tasks:
+    - name: Update apt package cache
+      apt:
+        update_cache: yes
+
+    - name: Install MySQL Server
+      apt:
+        name: mysql-server
+        state: present
+
+    - name: Secure MySQL installation
+      mysql_user:
+        name: root
+        password: "{{ lookup('env', 'MYSQL_ROOT_PASSWORD') }}"
+        host: localhost
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        check_implicit_admin: yes
+        priv: "*.*:ALL"
+
+    - name: Update MySQL configuration
+      lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^bind-address\s*='
+        line: 'bind-address            = 0.0.0.0'
+
+    - name: Restart MySQL service
+      service:
+        name: mysql
+        state: restarted
